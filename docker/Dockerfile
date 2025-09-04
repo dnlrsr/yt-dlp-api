@@ -1,0 +1,36 @@
+FROM python:3.11-slim
+
+RUN apt update && apt install -y \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install yt-dlp
+
+RUN  mkdir -p /downloads && mkdir -p /youtube
+
+# Create cache directory and set up user home directory
+RUN mkdir -p /home/appuser/.cache/yt-dlp && \
+    chown -R 1000:1000 /home/appuser
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . /app
+WORKDIR /app
+
+RUN mkdir -p /data/youtube
+RUN chown -R 1000:1000 /data/youtube /youtube /downloads /app
+
+# Switch to non-root user and set environment variables
+USER 1000:1000
+ENV XDG_CACHE_HOME=/home/appuser/.cache
+ENV HOME=/home/appuser
+
+EXPOSE 5000
+
+# Use Gunicorn for production
+ENV PYTHONUNBUFFERED=1
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "300", "--log-level", "info", "wsgi:app"]
+
