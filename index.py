@@ -100,7 +100,7 @@ def get_or_create_api_key():
             with open(TOKEN_FILE, 'r') as f:
                 token = f.read().strip()
             if token:  # Check if token is not empty
-                logger.info(f"Using existing API bearer key from file: {token}")
+                log_api_key(f"Using existing API bearer key from file: {token}")
                 return token
         except Exception as e:
             logger.error(f"Could not read token file: {e}")
@@ -110,11 +110,22 @@ def get_or_create_api_key():
     try:
         with open(TOKEN_FILE, 'w') as f:
             f.write(new_token)
-        logger.info(f"Generated new API bearer key and saved to file: {new_token}")
+        log_api_key(f"Generated new API bearer key and saved to file: {new_token}")
     except Exception as e:
         logger.error(f"Could not save token to file: {e}")
     
     return new_token
+
+def log_api_key(message):
+    """Log the API key to stdout."""
+    logger.info(f"------------------------------------------")
+    logger.info("")
+    logger.info("IMPORTANT: Save this API bearer key securely!")
+    logger.info("")
+    logger.info(message)
+    logger.info("")
+    logger.info(f"------------------------------------------")
+
 
 # Initialize API bearer key (will be set when wsgi.py imports this module)
 API_BEARER_KEY = None
