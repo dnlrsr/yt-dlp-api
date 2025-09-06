@@ -23,6 +23,7 @@ RUN chown -R 1000:1000 /data/youtube /data/downloads
 
 # Switch to non-root user and set environment variables
 USER 1000:1000
+RUN touch api_token.txt
 ENV XDG_CACHE_HOME=/home/appuser/.cache
 ENV HOME=/home/appuser
 ENV DOCKERIZED=true
