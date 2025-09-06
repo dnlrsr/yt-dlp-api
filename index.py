@@ -31,20 +31,25 @@ def process_download_job(job_id, video_url):
         logger.info(f"Starting download job {job_id} for URL: {video_url}")
         job_status[job_id] = "processing"
         
+        # Determine config location
+        docker_config = "/app/config/yt-dlp.conf"
+        local_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config/yt-dlp.dev.conf")
+        config_path = docker_config if os.environ.get("DOCKERIZED") == "true" else local_config
+
         # Run yt-dlp command
         yt_dlp_command = [
-            "yt-dlp", 
-            video_url,
-            "-o", "/youtube/%(uploader)s/%(title)s.%(ext)s"
+            "yt-dlp",
+            "--config-location", config_path,
+            video_url
         ]
-        
+
         result = subprocess.run(yt_dlp_command, capture_output=True, text=True, timeout=300)
-        
+
         logger.info(f"Job {job_id} completed with return code: {result.returncode}")
         logger.info(f"STDOUT: {result.stdout}")
         if result.stderr:
             logger.warning(f"STDERR: {result.stderr}")
-        
+
         if result.returncode == 0:
             job_status[job_id] = "completed"
             job_results[job_id] = {

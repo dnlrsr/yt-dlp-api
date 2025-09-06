@@ -25,6 +25,7 @@ RUN chown -R 1000:1000 /data/youtube /data/downloads
 USER 1000:1000
 ENV XDG_CACHE_HOME=/home/appuser/.cache
 ENV HOME=/home/appuser
+ENV DOCKERIZED=true
 
 EXPOSE 5000
 
