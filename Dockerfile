@@ -23,6 +23,7 @@ RUN chown -R 1000:1000 /data/youtube /data/downloads
 
 # Switch to non-root user and set environment variables
 RUN touch api_token.txt
+RUN chown -R 1000:1000 api_token.txt
 
 USER 1000:1000
 
