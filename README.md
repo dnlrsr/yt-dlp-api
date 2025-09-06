@@ -22,7 +22,7 @@ Run the API instantly using the published image:
 docker run -p 5000:5000 ghcr.io/dnlrsr/yt-dlp-api:latest
 ```
 
-This will start the API server on port 8080.
+This will start the API server on port 5000.
 
 ---
 
@@ -31,11 +31,13 @@ This will start the API server on port 8080.
 - **🔄 Asynchronous Processing**: Background job queue system for non-blocking downloads
 - **🔐 Bearer Token Authentication**: Secure API access with auto-generated tokens
 - **📊 Job Status Tracking**: Monitor download progress with unique job IDs
-- **🐳 Docker Ready**: Complete containerization with multi-stage builds
+- **🐳 Docker Ready**: Complete containerization with optimized builds
 - **⚡ Production Ready**: Gunicorn WSGI server with configurable workers
 - **📁 Organized Downloads**: Automatic file organization by uploader/channel
 - **🛡️ Error Handling**: Comprehensive error handling and logging
 - **⏱️ Timeout Protection**: Built-in request timeouts to prevent hanging
+- **🔧 Environment-Aware**: Separate configurations for Docker and development
+- **🏥 Health Monitoring**: Built-in health check endpoint with worker status
 
 ## 📋 Requirements
 
@@ -124,18 +126,38 @@ Check job status and get results
 }
 ```
 
+#### `GET /health`
+Health check endpoint with worker thread status monitoring
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "worker_thread_status": "running",
+  "process_id": 1234,
+  "pending_jobs": 0,
+  "total_jobs": 5
+}
+```
+
+**Worker Thread Status Values:**
+- `not_started`: Worker thread hasn't been initialized
+- `running`: Worker thread is active and processing jobs
+- `dead`: Worker thread has stopped (indicates an issue)
+
 ## 🐳 Docker Deployment
 
 ### Build & Run
 ```bash
 # Build the image
-docker build -t yt-dlp-api ./docker
+docker build -t yt-dlp-api .
 
 # Run with volume mounting for downloads
 docker run -d \
   --name yt-dlp-api \
   -p 5000:5000 \
-  -v $(pwd)/youtube:/youtube \
+  -v $(pwd)/data/youtube:/data/youtube \
+  -v $(pwd)/data/downloads:/data/downloads \
   -v $(pwd)/api_token.txt:/app/api_token.txt \
   yt-dlp-api
 ```
@@ -145,7 +167,7 @@ docker run -d \
 version: '3.8'
 services:
   yt-dlp-api:
-    build: ./docker
+    build: .
     ports:
       - "5000:5000"
     volumes:
@@ -223,6 +245,9 @@ curl -X POST http://localhost:5000/webhook \
 # Check job status
 curl -X GET http://localhost:5000/job/YOUR_JOB_ID \
   -H "Authorization: Bearer YOUR_TOKEN"
+
+# Health check (no auth required)
+curl -X GET http://localhost:5000/health
 ```
 
 ## 📁 Project Structure
@@ -234,13 +259,30 @@ yt-dlp-api/
 ├── 📄 requirements.txt      # Python dependencies
 ├── 📄 gunicorn.conf.py      # Gunicorn configuration
 ├── 📄 api_token.txt         # Auto-generated API token
-├── 🐳 docker/
-│   └── 📄 Dockerfile        # Container definition
-└── 📁 youtube/              # Downloaded videos (organized by uploader)
-    └── 📁 Artist/
+├── � Dockerfile            # Container definition
+├── 📄 .dockerignore         # Docker build optimization
+├── 📄 LICENSE               # MIT License
+├── 📁 config/
+│   ├── 📄 yt-dlp.conf       # Docker configuration
+│   └── 📄 yt-dlp.dev.conf   # Development configuration
+└── 📁 data/                 # Data directory
+    ├── 📁 youtube/          # Downloaded videos (organized by uploader)
+    │   └── 📁 Artist/
+    └── 📁 downloads/        # Temporary download files
 ```
 
 ## 🔧 Configuration
+
+### Environment-Aware Configuration
+The application automatically detects its environment and uses the appropriate configuration:
+
+- **Docker Environment** (`DOCKERIZED=true`): Uses `/app/config/yt-dlp.conf`
+  - Absolute paths: `/data/downloads` and `/data/youtube`
+  - Optimized for containerized deployment
+  
+- **Development Environment**: Uses `config/yt-dlp.dev.conf`
+  - Relative paths: `$PWD/data/downloads` and `$PWD/data/youtube`
+  - Suited for local development
 
 ### API Token Management
 - **Auto-generated**: Token is created automatically on first run
@@ -248,9 +290,18 @@ yt-dlp-api/
 - **Secure**: 32-byte URL-safe random token
 
 ### Download Organization
-Videos are saved to `/youtube/` with the following structure:
+Videos are saved with the following structure:
+
+**Docker Environment:**
 ```
-/youtube/{uploader}/{title}.{ext}
+/data/youtube/{uploader}/{title}.{ext}
+/data/downloads/  # Temporary files
+```
+
+**Development Environment:**
+```
+./data/youtube/{uploader}/{title}.{ext}
+./data/downloads/  # Temporary files
 ```
 
 ### Logging
@@ -266,6 +317,8 @@ The API handles various error conditions:
 - **Job not found**: Returns 404
 - **Download failures**: Captured in job results
 - **Timeouts**: 5-minute default timeout per job
+- **Worker thread monitoring**: Automatic restart and health reporting
+- **Graceful shutdown**: Worker threads shutdown cleanly on termination
 
 ## 🔒 Security Considerations
 
