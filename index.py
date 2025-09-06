@@ -26,21 +26,40 @@ shutdown_event = threading.Event()  # Event to signal worker shutdown
 # Token file path
 TOKEN_FILE = 'api_token.txt'
 
+# Determine and log config location at startup
+def get_config_path():
+    """Determine the appropriate config file path and log it."""
+    docker_config = "/app/config/yt-dlp.conf"
+    local_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config/yt-dlp.dev.conf")
+    config_path = docker_config if os.environ.get("DOCKERIZED") == "true" else local_config
+    
+    if os.environ.get("DOCKERIZED") == "true":
+        logger.info(f"Running in Docker mode - using config: {config_path}")
+    else:
+        logger.info(f"Running in development mode - using config: {config_path}")
+        logger.info(f"Using working directory: {os.getcwd()}")
+    
+    # Check if config file exists
+    if os.path.exists(config_path):
+        logger.info(f"Config file found at: {config_path}")
+    else:
+        logger.warning(f"Config file not found at: {config_path}")
+    
+    return config_path
+
+# Initialize config path at startup
+CONFIG_PATH = get_config_path()
+
 def process_download_job(job_id, video_url):
     """Process a download job in the background."""
     try:
         logger.info(f"Starting download job {job_id} for URL: {video_url}")
         job_status[job_id] = "processing"
         
-        # Determine config location
-        docker_config = "/app/config/yt-dlp.conf"
-        local_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config/yt-dlp.dev.conf")
-        config_path = docker_config if os.environ.get("DOCKERIZED") == "true" else local_config
-
-        # Run yt-dlp command
+        # Run yt-dlp command using the config file
         yt_dlp_command = [
             "yt-dlp",
-            "--config-location", config_path,
+            "--config-location", CONFIG_PATH,
             video_url
         ]
 
