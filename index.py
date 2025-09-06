@@ -21,9 +21,34 @@ logger = logging.getLogger(__name__)
 job_queue = queue.Queue()
 job_status = {}  # Dictionary to store job statuses
 job_results = {}  # Dictionary to store job results
+shutdown_event = threading.Event()  # Event to signal worker shutdown
 
 # Token file path
 TOKEN_FILE = 'api_token.txt'
+
+# Determine and log config location at startup
+def get_config_path():
+    """Determine the appropriate config file path and log it."""
+    docker_config = "/app/config/yt-dlp.conf"
+    local_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config/yt-dlp.dev.conf")
+    config_path = docker_config if os.environ.get("DOCKERIZED") == "true" else local_config
+    
+    if os.environ.get("DOCKERIZED") == "true":
+        logger.info(f"Running in Docker mode - using config: {config_path}")
+    else:
+        logger.info(f"Running in development mode - using config: {config_path}")
+        logger.info(f"Using working directory: {os.getcwd()}")
+    
+    # Check if config file exists
+    if os.path.exists(config_path):
+        logger.info(f"Config file found at: {config_path}")
+    else:
+        logger.warning(f"Config file not found at: {config_path}")
+    
+    return config_path
+
+# Initialize config path at startup
+CONFIG_PATH = get_config_path()
 
 def process_download_job(job_id, video_url):
     """Process a download job in the background."""
@@ -31,20 +56,20 @@ def process_download_job(job_id, video_url):
         logger.info(f"Starting download job {job_id} for URL: {video_url}")
         job_status[job_id] = "processing"
         
-        # Run yt-dlp command
+        # Run yt-dlp command using the config file
         yt_dlp_command = [
-            "yt-dlp", 
-            video_url,
-            "-o", "/youtube/%(uploader)s/%(title)s.%(ext)s"
+            "yt-dlp",
+            "--config-location", CONFIG_PATH,
+            video_url
         ]
-        
+
         result = subprocess.run(yt_dlp_command, capture_output=True, text=True, timeout=300)
-        
+
         logger.info(f"Job {job_id} completed with return code: {result.returncode}")
         logger.info(f"STDOUT: {result.stdout}")
         if result.stderr:
             logger.warning(f"STDERR: {result.stderr}")
-        
+
         if result.returncode == 0:
             job_status[job_id] = "completed"
             job_results[job_id] = {
@@ -78,20 +103,46 @@ def process_download_job(job_id, video_url):
 
 def worker():
     """Worker thread to process jobs from the queue."""
-    while True:
+    logger.info(f"Worker thread started in process {os.getpid()}")
+    while not shutdown_event.is_set():
         try:
             job_id, video_url = job_queue.get(timeout=1)
+            if job_id is None:  # Shutdown signal
+                break
             process_download_job(job_id, video_url)
             job_queue.task_done()
         except queue.Empty:
             continue
         except Exception as e:
             logger.error(f"Worker error: {e}")
+    logger.info(f"Worker thread shutting down in process {os.getpid()}")
 
-# Start worker thread
-worker_thread = threading.Thread(target=worker, daemon=True)
-worker_thread.start()
-logger.info("Download worker thread started")
+# Global variable to track worker thread
+worker_thread = None
+worker_lock = threading.Lock()
+
+def ensure_worker_running():
+    """Ensure the worker thread is running in the current process."""
+    global worker_thread
+    with worker_lock:
+        if worker_thread is None or not worker_thread.is_alive():
+            logger.info(f"Starting worker thread in process {os.getpid()}")
+            shutdown_event.clear()  # Reset shutdown event
+            worker_thread = threading.Thread(target=worker, daemon=False)
+            worker_thread.start()
+            logger.info("Download worker thread started")
+        else:
+            logger.debug("Worker thread already running")
+
+def shutdown_worker():
+    """Gracefully shutdown the worker thread."""
+    global worker_thread
+    if worker_thread and worker_thread.is_alive():
+        logger.info("Shutting down worker thread...")
+        shutdown_event.set()
+        job_queue.put((None, None))  # Signal to stop
+        worker_thread.join(timeout=5)
+        logger.info("Worker thread shutdown complete")
 
 def get_or_create_api_key():
     """Get existing API key from file or create a new one."""
@@ -100,7 +151,7 @@ def get_or_create_api_key():
             with open(TOKEN_FILE, 'r') as f:
                 token = f.read().strip()
             if token:  # Check if token is not empty
-                logger.info(f"Using existing API bearer key from file: {token}")
+                log_api_key(f"Using existing API bearer key from file: {token}")
                 return token
         except Exception as e:
             logger.error(f"Could not read token file: {e}")
@@ -110,11 +161,22 @@ def get_or_create_api_key():
     try:
         with open(TOKEN_FILE, 'w') as f:
             f.write(new_token)
-        logger.info(f"Generated new API bearer key and saved to file: {new_token}")
+        log_api_key(f"Generated new API bearer key and saved to file: {new_token}")
     except Exception as e:
         logger.error(f"Could not save token to file: {e}")
     
     return new_token
+
+def log_api_key(message):
+    """Log the API key to stdout."""
+    logger.info(f"------------------------------------------")
+    logger.info("")
+    logger.info("IMPORTANT: Save this API bearer key securely!")
+    logger.info("")
+    logger.info(message)
+    logger.info("")
+    logger.info(f"------------------------------------------")
+
 
 # Initialize API bearer key (will be set when wsgi.py imports this module)
 API_BEARER_KEY = None
@@ -136,6 +198,9 @@ app = Flask(__name__)
 
 # Initialize API key immediately when the app is created
 init_api_key()
+
+# Ensure worker thread is running
+ensure_worker_running()
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -176,6 +241,9 @@ def webhook():
         
         # Generate unique job ID
         job_id = str(uuid.uuid4())
+        
+        # Ensure worker thread is running before adding job
+        ensure_worker_running()
         
         # Add job to queue
         job_status[job_id] = "pending"
@@ -243,6 +311,27 @@ def get_job_status(job_id):
         response.update(job_results[job_id])
     
     return jsonify(response), 200
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint that also shows worker thread status."""
+    global worker_thread
+    
+    worker_status = "unknown"
+    if worker_thread is None:
+        worker_status = "not_started"
+    elif worker_thread.is_alive():
+        worker_status = "running"
+    else:
+        worker_status = "dead"
+    
+    return jsonify({
+        "status": "healthy",
+        "worker_thread_status": worker_status,
+        "process_id": os.getpid(),
+        "pending_jobs": job_queue.qsize(),
+        "total_jobs": len(job_status)
+    }), 200
 
 if __name__ == '__main__':
     # API key is already initialized when the module loads
