@@ -2,3 +2,4 @@ venv
 youtube
 downloads
 api_token.txt
+__pycache__/
