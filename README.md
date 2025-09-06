@@ -19,10 +19,18 @@
 Run the API instantly using the published image:
 
 ```bash
-docker run -p 5000:5000 ghcr.io/dnlrsr/yt-dlp-api:latest
+docker run -d \
+  --name yt-dlp-api \
+  -p 5000:5000 \
+  -v $(pwd)/data/youtube:/data/youtube \
+  -v $(pwd)/data/downloads:/data/downloads \
+  -v $(pwd)/api_token.txt:/app/api_token.txt \ # if you want it outside of the container
+  ghcr.io/dnlrsr/yt-dlp-api:latest
 ```
 
 This will start the API server on port 5000.
+
+> Api Token can be found in the start up logs or in the file.
 
 ---
 
