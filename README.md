@@ -14,6 +14,17 @@
 </div>
 
 ---
+## 🐳 Quickstart Docker
+
+Run the API instantly using the published image:
+
+```bash
+docker run -p 5000:5000 ghcr.io/dnlrsr/yt-dlp-api:latest
+```
+
+This will start the API server on port 8080.
+
+---
 
 ## 🚀 Features
 
